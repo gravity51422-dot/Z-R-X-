@@ -1,179 +1,230 @@
-/* Z∅RΔX : System Conflict - UI/Visual FX Style Sheet */
+/**
+ * Z∅RΔX : System Conflict - Main Logic
+ * 2-Player PVP Shooting Engine (Advanced Skill Build)
+ */
 
-:root {
-    --neon-blue: #00f2ff;
-    --neon-pink: #ff00ea;
-    --glitch-red: #ff3e3e;
-    --bg-dark: #0a0a0c;
-    --grid-color: rgba(0, 242, 255, 0.1);
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startScreen = document.getElementById('start-screen');
+
+// UI 게이지 참조
+const p1IntBar = document.getElementById('p1-integrity');
+const p1StbBar = document.getElementById('p1-stability');
+const p2IntBar = document.getElementById('p2-integrity');
+const p2StbBar = document.getElementById('p2-stability');
+
+let gameActive = false;
+let animationId;
+
+function resize() {
+    canvas.width = window.innerWidth * 0.9;
+    canvas.height = window.innerHeight * 0.8;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// 플레이어 초기 상태 및 조작 키 정의
+const players = {
+    p1: {
+        id: 'USER_01',
+        x: 100, y: 0, color: '#00f2ff', 
+        integrity: 100, stability: 100, 
+        size: 30, speed: 6,
+        bullets: [], lastShot: 0, lastDash: 0, lastSkill: 0,
+        dir: {x: 1, y: 0},
+        keys: { up: 'w', down: 's', left: 'a', right: 'd', dash: 'q', fire: 'e', skill: 'r' }
+    },
+    p2: {
+        id: 'USER_02',
+        x: 0, y: 0, color: '#ff00ea',
+        integrity: 100, stability: 100, 
+        size: 30, speed: 6,
+        bullets: [], lastShot: 0, lastDash: 0, lastSkill: 0,
+        dir: {x: -1, y: 0},
+        keys: { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', dash: 'k', fire: 'l', skill: 'j' }
+    }
+};
+
+players.p1.y = canvas.height / 2;
+players.p2.x = canvas.width - 100;
+players.p2.y = canvas.height / 2;
+
+const activeKeys = new Set();
+window.addEventListener('keydown', e => activeKeys.add(e.key.toLowerCase()));
+window.addEventListener('keyup', e => activeKeys.delete(e.key.toLowerCase()));
+
+function startGame() {
+    startScreen.style.display = 'none';
+    gameActive = true;
+    gameLoop();
 }
 
-body, html {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    background-color: var(--bg-dark);
-    color: #fff;
-    font-family: 'Courier New', Courier, monospace;
-    overflow: hidden;
-    user-select: none;
+// 일반 사격 (E / L)
+function spawnBullet(p) {
+    const now = Date.now();
+    if (p.stability < 15 || now - p.lastShot < 250) return;
+    
+    p.bullets.push({
+        x: p.x, y: p.y,
+        vx: p.dir.x * 16, vy: p.dir.y * 16,
+        damage: 8, radius: 5, type: 'normal', color: p.color
+    });
+    
+    p.stability -= 12;
+    p.lastShot = now;
 }
 
-/* CRT 주사선 효과 (Overlay) */
-body::before {
-    content: " ";
-    display: block;
-    position: absolute;
-    top: 0; left: 0; bottom: 0; right: 0;
-    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
-                linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-    z-index: 1000;
-    background-size: 100% 2px, 3px 100%;
-    pointer-events: none;
+// 스킬 사격 (R / J)
+function spawnSkill(p) {
+    const now = Date.now();
+    if (p.stability < 40 || now - p.lastSkill < 1500) return; // 쿨타임 1.5초
+    
+    // 강력한 대형 탄환
+    p.bullets.push({
+        x: p.x, y: p.y,
+        vx: p.dir.x * 10, vy: p.dir.y * 10,
+        damage: 25, radius: 15, type: 'skill', color: '#fff'
+    });
+    
+    p.stability -= 40;
+    p.lastSkill = now;
 }
 
-#game-container {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background: 
-        linear-gradient(var(--grid-color) 1px, transparent 1px),
-        linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-    background-size: 40px 40px;
+// 대시 (Q / K)
+function performDash(p) {
+    const now = Date.now();
+    if (p.stability < 20 || now - p.lastDash < 800) return; // 쿨타임 0.8초
+    
+    p.x += p.dir.x * 80;
+    p.y += p.dir.y * 80;
+    
+    p.stability -= 20;
+    p.lastDash = now;
 }
 
-/* UI 레이어: 무결성(Integrity) & 안정성(Stability) */
-.ui-layer {
-    position: absolute;
-    top: 30px;
-    width: 90%;
-    display: flex;
-    justify-content: space-between;
-    z-index: 100;
-    pointer-events: none;
+function updatePlayer(p, otherP) {
+    let dx = 0, dy = 0;
+    
+    if (activeKeys.has(p.keys.up)) dy -= 1;
+    if (activeKeys.has(p.keys.down)) dy += 1;
+    if (activeKeys.has(p.keys.left)) dx -= 1;
+    if (activeKeys.has(p.keys.right)) dx += 1;
+
+    if (dx !== 0 || dy !== 0) {
+        const mag = Math.sqrt(dx*dx + dy*dy);
+        p.dir.x = dx / mag;
+        p.dir.y = dy / mag;
+        p.x += p.dir.x * p.speed;
+        p.y += p.dir.y * p.speed;
+    }
+
+    // 기능 키 입력
+    if (activeKeys.has(p.keys.fire)) spawnBullet(p);
+    if (activeKeys.has(p.keys.skill)) spawnSkill(p);
+    if (activeKeys.has(p.keys.dash)) performDash(p);
+
+    p.x = Math.max(p.size, Math.min(canvas.width - p.size, p.x));
+    p.y = Math.max(p.size, Math.min(canvas.height - p.size, p.y));
+
+    if (p.stability < 100) p.stability += 0.4;
+
+    p.bullets.forEach((b, index) => {
+        b.x += b.vx;
+        b.y += b.vy;
+
+        const dist = Math.hypot(b.x - otherP.x, b.y - otherP.y);
+        if (dist < otherP.size / 1.5 + b.radius) {
+            otherP.integrity -= b.damage;
+            triggerSubtleGlitch(); // 완화된 글리치 호출
+            p.bullets.splice(index, 1);
+        }
+
+        if (b.x < -100 || b.x > canvas.width + 100 || b.y < -100 || b.y > canvas.height + 100) {
+            p.bullets.splice(index, 1);
+        }
+    });
 }
 
-.player-stats {
-    background: rgba(10, 10, 12, 0.85);
-    padding: 15px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
-    min-width: 250px;
-    clip-path: polygon(0 0, 100% 0, 100% 70%, 90% 100%, 0 100%);
+// 완화된 글리치 효과 (눈의 피로도 감소)
+function triggerSubtleGlitch() {
+    canvas.style.transform = `translate(${(Math.random()-0.5)*10}px, ${(Math.random()-0.5)*10}px)`;
+    canvas.style.filter = 'brightness(1.2) contrast(1.1)';
+    setTimeout(() => {
+        canvas.style.transform = 'translate(0, 0)';
+        canvas.style.filter = 'none';
+    }, 100);
 }
 
-.player-stats.p1 { border-left: 5px solid var(--neon-blue); }
-.player-stats.p2 { border-right: 5px solid var(--neon-pink); text-align: right; }
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-.stat-label {
-    font-size: 0.7rem;
-    letter-spacing: 2px;
-    margin-bottom: 5px;
-    color: #aaa;
+    [players.p1, players.p2].forEach(p => {
+        ctx.save();
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = p.color;
+        ctx.fillStyle = p.color;
+        
+        // 피격 시 떨림 강도 하향
+        const tremble = (100 - p.integrity) / 25;
+        const tx = (Math.random() - 0.5) * tremble;
+        const ty = (Math.random() - 0.5) * tremble;
+        
+        ctx.fillRect(p.x - p.size/2 + tx, p.y - p.size/2 + ty, p.size, p.size);
+        
+        // 방향 지시선
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + p.dir.x * 40, p.y + p.dir.y * 40);
+        ctx.stroke();
+
+        ctx.restore();
+
+        p.bullets.forEach(b => {
+            ctx.save();
+            ctx.fillStyle = b.color;
+            ctx.shadowBlur = b.type === 'skill' ? 20 : 5;
+            ctx.shadowColor = b.color;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        });
+    });
+
+    updateUI();
+
+    if (players.p1.integrity <= 0 || players.p2.integrity <= 0) {
+        endGame();
+    }
 }
 
-.stat-bar-container {
-    width: 100%;
-    height: 8px;
-    background: #1a1a1e;
-    margin-bottom: 8px;
-    position: relative;
-    overflow: hidden;
+function updateUI() {
+    p1IntBar.style.width = `${Math.max(0, players.p1.integrity)}%`;
+    p1StbBar.style.width = `${players.p1.stability}%`;
+    p2IntBar.style.width = `${Math.max(0, players.p2.integrity)}%`;
+    p2StbBar.style.width = `${players.p2.stability}%`;
 }
 
-.integrity-bar {
-    height: 100%;
-    background: var(--neon-blue);
-    box-shadow: 0 0 10px var(--neon-blue);
-    transition: width 0.3s cubic-bezier(0.17, 0.67, 0.83, 0.67);
+function endGame() {
+    gameActive = false;
+    cancelAnimationFrame(animationId);
+    const winner = players.p1.integrity <= 0 ? "USER_02" : "USER_01";
+    setTimeout(() => {
+        if(confirm(`[SYSTEM REBOOT REQUIRED]\nWINNER: ${winner}\n\nAGAIN?`)) {
+            location.reload();
+        }
+    }, 100);
 }
 
-.p2 .integrity-bar {
-    background: var(--neon-pink);
-    box-shadow: 0 0 10px var(--neon-pink);
+function gameLoop() {
+    if (!gameActive) return;
+    updatePlayer(players.p1, players.p2);
+    updatePlayer(players.p2, players.p1);
+    draw();
+    animationId = requestAnimationFrame(gameLoop);
 }
 
-.stability-bar {
-    height: 100%;
-    background: #00ff44;
-    transition: width 0.1s;
-}
-
-/* 게임 캔버스 */
-#gameCanvas {
-    border: 1px solid rgba(0, 242, 255, 0.2);
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
-    background: rgba(0, 0, 0, 0.6);
-}
-
-/* 피격 시 글리치 애니메이션 */
-.glitch-active {
-    animation: screen-shake 0.2s infinite;
-    filter: url(#glitch-filter) hue-rotate(90deg) contrast(1.5);
-}
-
-@keyframes screen-shake {
-    0% { transform: translate(0); }
-    20% { transform: translate(-5px, 5px); }
-    40% { transform: translate(-5px, -5px); }
-    60% { transform: translate(5px, 5px); }
-    80% { transform: translate(5px, -5px); }
-    100% { transform: translate(0); }
-}
-
-/* 시작 화면 & 도감 모달 스타일 */
-#start-screen, .modal {
-    position: absolute;
-    inset: 0;
-    background: rgba(5, 5, 7, 0.95);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 500;
-}
-
-.glitch-text {
-    font-size: 5rem;
-    font-weight: bold;
-    text-transform: uppercase;
-    position: relative;
-    text-shadow: 0.05em 0 0 var(--glitch-red), -0.05em -0.025em 0 var(--neon-blue),
-                 0.025em 0.05em 0 var(--neon-pink);
-    animation: text-glitch 2s infinite;
-}
-
-@keyframes text-glitch {
-    0% { text-shadow: 0.05em 0 0 var(--glitch-red), -0.05em -0.025em 0 var(--neon-blue); }
-    14% { text-shadow: 0.05em 0 0 var(--glitch-red), -0.05em -0.025em 0 var(--neon-blue); }
-    15% { text-shadow: -0.05em -0.025em 0 var(--glitch-red), 0.025em 0.025em 0 var(--neon-blue); }
-    49% { text-shadow: -0.05em -0.025em 0 var(--glitch-red), 0.025em 0.025em 0 var(--neon-blue); }
-    50% { text-shadow: 0.025em 0.05em 0 var(--glitch-red), 0.05em 0 0 var(--neon-blue); }
-    99% { text-shadow: 0.025em 0.05em 0 var(--glitch-red), 0.05em 0 0 var(--neon-blue); }
-    100% { text-shadow: -0.025em 0 0 var(--glitch-red), -0.025em -0.025em 0 var(--neon-blue); }
-}
-
-.btn {
-    margin-top: 30px;
-    padding: 12px 40px;
-    background: transparent;
-    border: 2px solid var(--neon-blue);
-    color: var(--neon-blue);
-    font-family: inherit;
-    font-size: 1.2rem;
-    font-weight: bold;
-    cursor: pointer;
-    text-transform: uppercase;
-    transition: 0.2s;
-    letter-spacing: 3px;
-}
-
-.btn:hover {
-    background: var(--neon-blue);
-    color: var(--bg-dark);
-    box-shadow: 0 0 20px var(--neon-blue);
-}
+window.onload = () => { console.log("Z∅RΔX System Initialized..."); };
