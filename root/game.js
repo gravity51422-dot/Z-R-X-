@@ -1,3 +1,4 @@
+alert("업데이트 확인");
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
