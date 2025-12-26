@@ -1,1 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Z∅RΔX : System Conflict</title>
+    <style>
+        :root {
+            --neon-blue: #00f2ff;
+            --neon-pink: #ff00ea;
+            --glitch-red: #ff3e3e;
+            --bg-dark: #0a0a0c;
+        }
 
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-dark);
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* UI Overlay */
+        .ui-layer {
+            position: absolute;
+            top: 20px;
+            width: 90%;
+            display: flex;
+            justify-content: space-between;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .player-stats {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-left: 4px solid var(--neon-blue);
+            min-width: 200px;
+        }
+
+        .player-stats.p2 {
+            border-left: none;
+            border-right: 4px solid var(--neon-pink);
+            text-align: right;
+        }
+
+        .stat-bar-container {
+            width: 100%;
+            height: 10px;
+            background: #333;
+            margin: 5px 0;
+        }
+
+        .integrity-bar { height: 100%; background: var(--neon-blue); transition: width 0.2s; }
+        .stability-bar { height: 100%; background: #00ff44; transition: width 0.2s; }
+        .p2 .integrity-bar { background: var(--neon-pink); }
+
+        /* Canvas Setup */
+        canvas {
+            background: radial-gradient(circle, #1a1a2e 0%, #0a0a0c 100%);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+            cursor: crosshair;
+        }
+
+        /* Glitch Effects */
+        .glitch-active {
+            animation: glitch 0.15s infinite;
+        }
+
+        @keyframes glitch {
+            0% { transform: translate(2px, 2px); filter: hue-rotate(90deg); }
+            25% { transform: translate(-2px, -2px); filter: invert(0.1); }
+            50% { transform: translate(3px, -1px); filter: contrast(2); }
+            75% { transform: translate(-3px, 1px); filter: brightness(1.5); }
+            100% { transform: translate(0, 0); }
+        }
+
+        /* Instructions Overlay */
+        #start-screen {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border: 2px solid var(--neon-blue);
+            background: transparent;
+            color: var(--neon-blue);
+            font-size: 1.5rem;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: var(--neon-blue);
+            color: black;
+            box-shadow: 0 0 20px var(--neon-blue);
+        }
+
+        .controls {
+            display: flex;
+            gap: 50px;
+            margin-top: 20px;
+            font-size: 0.8rem;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="start-screen">
+        <h1 style="font-size: 4rem; text-shadow: 0 0 10px var(--neon-blue);">Z∅RΔX</h1>
+        <p>SYSTEM CONFLICT DETECTED</p>
+        <div class="controls">
+            <div>
+                <h3>PLAYER 1 (BLUE)</h3>
+                <p>MOVE: W, A, S, D</p>
+                <p>SHOOT: SPACE</p>
+            </div>
+            <div>
+                <h3>PLAYER 2 (PINK)</h3>
+                <p>MOVE: ARROW KEYS</p>
+                <p>SHOOT: ENTER / NUM 0</p>
+            </div>
+        </div>
+        <button class="btn" onclick="startGame()">INITIALIZE SYSTEM</button>
+    </div>
+
+    <div class="ui-layer">
+        <div class="player-stats p1">
+            <div>USER_01: ACTIVE</div>
+            <div class="stat-bar-container"><div id="p1-integrity" class="integrity-bar" style="width: 100%;"></div></div>
+            <div class="stat-bar-container"><div id="p1-stability" class="stability-bar" style="width: 100%;"></div></div>
+        </div>
+        <div class="player-stats p2">
+            <div>USER_02: ACTIVE</div>
+            <div class="stat-bar-container"><div id="p2-integrity" class="integrity-bar" style="width: 100%;"></div></div>
+            <div class="stat-bar-container"><div id="p2-stability" class="stability-bar" style="width: 100%;"></div></div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const startScreen = document.getElementById('start-screen');
+
+    // UI Elements
+    const p1IntBar = document.getElementById('p1-integrity');
+    const p1StbBar = document.getElementById('p1-stability');
+    const p2IntBar = document.getElementById('p2-integrity');
+    const p2StbBar = document.getElementById('p2-stability');
+
+    let gameActive = false;
+
+    // Responsive Canvas
+    function resize() {
+        canvas.width = window.innerWidth * 0.9;
+        canvas.height = window.innerHeight * 0.8;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Game Objects
+    const players = {
+        p1: {
+            x: 100, y: canvas.height/2, color: '#00f2ff', 
+            hp: 100, st: 100, size: 25, speed: 5,
+            bullets: [], lastShot: 0, dir: {x: 1, y: 0},
+            keys: { up: 'w', down: 's', left: 'a', right: 'd', fire: ' ' }
+        },
+        p2: {
+            x: canvas.width - 100, y: canvas.height/2, color: '#ff00ea',
+            hp: 100, st: 100, size: 25, speed: 5,
+            bullets: [], lastShot: 0, dir: {x: -1, y: 0},
+            keys: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', fire: 'Enter' }
+        }
+    };
+
+    const activeKeys = new Set();
+    window.addEventListener('keydown', e => activeKeys.add(e.key.toLowerCase()));
+    window.addEventListener('keyup', e => activeKeys.delete(e.key.toLowerCase()));
+
+    function startGame() {
+        startScreen.style.display = 'none';
+        gameActive = true;
+        gameLoop();
+    }
+
+    function spawnBullet(p) {
+        if (p.st < 10 || Date.now() - p.lastShot < 300) return;
+        
+        p.bullets.push({
+            x: p.x,
+            y: p.y,
+            vx: p.dir.x * 12,
+            vy: p.dir.y * 12,
+            damage: 10
+        });
+        p.st -= 15;
+        p.lastShot = Date.now();
+    }
+
+    function updatePlayer(p, otherP) {
+        let dx = 0, dy = 0;
+        if (activeKeys.has(p.keys.up.toLowerCase())) dy -= 1;
+        if (activeKeys.has(p.keys.down.toLowerCase())) dy += 1;
+        if (activeKeys.has(p.keys.left.toLowerCase())) dx -= 1;
+        if (activeKeys.has(p.keys.right.toLowerCase())) dx += 1;
+
+        if (dx !== 0 || dy !== 0) {
+            // Normalize
+            const mag = Math.sqrt(dx*dx + dy*dy);
+            p.dir.x = dx / mag;
+            p.dir.y = dy / mag;
+            
+            p.x += p.dir.x * p.speed;
+            p.y += p.dir.y * p.speed;
+        }
+
+        if (activeKeys.has(p.keys.fire.toLowerCase())) spawnBullet(p);
+
+        // Boundary
+        p.x = Math.max(p.size, Math.min(canvas.width - p.size, p.x));
+        p.y = Math.max(p.size, Math.min(canvas.height - p.size, p.y));
+
+        // Regain Stability
+        if (p.st < 100) p.st += 0.5;
+
+        // Update Bullets
+        p.bullets.forEach((b, index) => {
+            b.x += b.vx;
+            b.y += b.vy;
+
+            // Collision with other player
+            const dist = Math.hypot(b.x - otherP.x, b.y - otherP.y);
+            if (dist < otherP.size) {
+                otherP.hp -= b.damage;
+                triggerGlitch();
+                p.bullets.splice(index, 1);
+            }
+
+            // Screen boundary
+            if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+                p.bullets.splice(index, 1);
+            }
+        });
+    }
+
+    function triggerGlitch() {
+        canvas.classList.add('glitch-active');
+        setTimeout(() => canvas.classList.remove('glitch-active'), 200);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Grid lines (Background)
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.05)';
+        for(let i=0; i<canvas.width; i+=40) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+        }
+        for(let i=0; i<canvas.height; i+=40) {
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
+        }
+
+        [players.p1, players.p2].forEach(p => {
+            // Draw Player
+            ctx.fillStyle = p.color;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = p.color;
+            
+            // Glitchy body
+            ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+            
+            // Direction Indicator
+            ctx.strokeStyle = 'white';
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x + p.dir.x * 30, p.y + p.dir.y * 30);
+            ctx.stroke();
+
+            // Bullets
+            ctx.fillStyle = 'white';
+            p.bullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 4, 0, Math.PI*2);
+                ctx.fill();
+            });
+        });
+
+        // Update UI Bars
+        p1IntBar.style.width = players.p1.hp + '%';
+        p1StbBar.style.width = players.p1.st + '%';
+        p2IntBar.style.width = players.p2.hp + '%';
+        p2StbBar.style.width = players.p2.st + '%';
+
+        // Check Victory
+        if (players.p1.hp <= 0 || players.p2.hp <= 0) {
+            gameActive = false;
+            const winner = players.p1.hp <= 0 ? "USER_02" : "USER_01";
+            alert(`CRITICAL ERROR: ${winner} DOMINATED THE SYSTEM`);
+            location.reload();
+        }
+    }
+
+    function gameLoop() {
+        if (!gameActive) return;
+        updatePlayer(players.p1, players.p2);
+        updatePlayer(players.p2, players.p1);
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+</script>
+
+</body>
+</html>
